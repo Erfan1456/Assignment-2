@@ -1,30 +1,26 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
+import 'package:assignment02/main.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:assignment02/main.dart';
-
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  testWidgets('shows broadcast receiver selection on launch', (tester) async {
+    await tester.pumpWidget(const Assignment02App());
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    expect(find.text('App'), findsOneWidget);
+    expect(find.text('Select a broadcast type'), findsOneWidget);
+    expect(find.text('Custom broadcast receiver'), findsOneWidget);
+    expect(find.text('Proceed'), findsOneWidget);
+  });
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+  testWidgets('drawer lists the four menu options', (tester) async {
+    await tester.pumpWidget(const Assignment02App());
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.menu));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Broadcast Receiver'), findsOneWidget);
+    expect(find.text('Image Scale'), findsOneWidget);
+    expect(find.text('Video'), findsOneWidget);
+    expect(find.text('Audio'), findsOneWidget);
   });
 }
