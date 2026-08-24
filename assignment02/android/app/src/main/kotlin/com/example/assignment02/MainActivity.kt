@@ -9,31 +9,22 @@ import android.os.Build
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
-import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     companion object {
         private const val CUSTOM_EVENT_CHANNEL = "assignment02/custom_broadcast"
         private const val BATTERY_EVENT_CHANNEL = "assignment02/battery_broadcast"
-        private const val AUDIO_CHANNEL = "assignment02/audio"
-        private const val VIDEO_VIEW_TYPE = "assignment02/video"
         const val CUSTOM_ACTION = "com.example.assignment02.CUSTOM_BROADCAST"
         const val EXTRA_MESSAGE = "message"
     }
 
     private var customReceiver: BroadcastReceiver? = null
     private var batteryReceiver: BroadcastReceiver? = null
-    private val audioPlayer = NativeAudioPlayer()
+    private var mediaHandler: MediaHandler? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, AUDIO_CHANNEL)
-            .setMethodCallHandler(audioPlayer)
-        flutterEngine.platformViewsController.registry.registerViewFactory(
-            VIDEO_VIEW_TYPE,
-            NativeVideoViewFactory(),
-        )
+        mediaHandler = MediaHandler(this, flutterEngine)
 
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, CUSTOM_EVENT_CHANNEL)
             .setStreamHandler(
@@ -122,7 +113,7 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         unregisterCustomReceiver()
         unregisterBatteryReceiver()
-        audioPlayer.release()
+        mediaHandler?.dispose()
         super.onDestroy()
     }
 }
