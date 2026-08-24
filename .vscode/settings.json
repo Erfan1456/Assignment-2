@@ -1,0 +1,5 @@
+{
+  "dart.env": {
+    "PUB_CACHE": "${workspaceFolder}/assignment02/.pub-cache"
+  }
+}

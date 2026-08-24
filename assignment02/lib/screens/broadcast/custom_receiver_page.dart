@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../../services/broadcast_channel.dart';
 
@@ -17,21 +16,16 @@ class CustomReceiverPage extends StatefulWidget {
 class _CustomReceiverPageState extends State<CustomReceiverPage> {
   StreamSubscription<String>? _subscription;
   String _received = '';
-  String? _error;
 
   @override
   void initState() {
     super.initState();
-    _subscription = BroadcastChannel.customBroadcasts(widget.message).listen(
-      (message) => setState(() => _received = message),
-      onError: (Object error) {
-        setState(() {
-          _error = error is MissingPluginException
-              ? 'Custom broadcast receiver is available on Android only.'
-              : error.toString();
-        });
-      },
-    );
+    _subscription = AppBroadcast.custom.listen((message) {
+      setState(() => _received = message);
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      AppBroadcast.sendCustom(widget.message);
+    });
   }
 
   @override
@@ -48,10 +42,7 @@ class _CustomReceiverPageState extends State<CustomReceiverPage> {
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Text(
-            _error ??
-                (_received.isEmpty
-                    ? 'Waiting for custom broadcast...'
-                    : _received),
+            _received.isEmpty ? 'Waiting for custom broadcast...' : _received,
             textAlign: TextAlign.center,
           ),
         ),

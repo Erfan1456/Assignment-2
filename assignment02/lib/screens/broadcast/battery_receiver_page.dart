@@ -1,9 +1,7 @@
 import 'dart:async';
 
+import 'package:battery_plus/battery_plus.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-
-import '../../services/broadcast_channel.dart';
 
 class BatteryReceiverPage extends StatefulWidget {
   const BatteryReceiverPage({super.key});
@@ -13,37 +11,38 @@ class BatteryReceiverPage extends StatefulWidget {
 }
 
 class _BatteryReceiverPageState extends State<BatteryReceiverPage> {
-  StreamSubscription<int>? _subscription;
+  final Battery _battery = Battery();
+  StreamSubscription<BatteryState>? _subscription;
+  Timer? _timer;
   int? _percent;
-  String? _error;
 
   @override
   void initState() {
     super.initState();
-    _subscription = BroadcastChannel.batteryPercents().listen(
-      (percent) => setState(() => _percent = percent),
-      onError: (Object error) {
-        setState(() {
-          _error = error is MissingPluginException
-              ? 'Battery broadcast receiver is available on Android only.'
-              : error.toString();
-        });
-      },
-    );
+    _readLevel();
+    _subscription = _battery.onBatteryStateChanged.listen((_) => _readLevel());
+    _timer = Timer.periodic(const Duration(seconds: 2), (_) => _readLevel());
+  }
+
+  Future<void> _readLevel() async {
+    final percent = await _battery.batteryLevel;
+    if (mounted) {
+      setState(() => _percent = percent);
+    }
   }
 
   @override
   void dispose() {
     _subscription?.cancel();
+    _timer?.cancel();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final body = _error ??
-        (_percent == null
-            ? 'Waiting for battery broadcast...'
-            : 'Battery percentage: $_percent%');
+    final body = _percent == null
+        ? 'Waiting for battery broadcast...'
+        : 'Battery percentage: $_percent%';
 
     return Scaffold(
       appBar: AppBar(title: const Text('App'), centerTitle: true),

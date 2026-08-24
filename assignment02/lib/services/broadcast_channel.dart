@@ -1,20 +1,14 @@
-import 'package:flutter/services.dart';
+import 'dart:async';
 
-class BroadcastChannel {
-  static const EventChannel _customEvents = EventChannel(
-    'assignment02/custom_broadcast',
-  );
-  static const EventChannel _batteryEvents = EventChannel(
-    'assignment02/battery_broadcast',
-  );
+class AppBroadcast {
+  AppBroadcast._();
 
-  static Stream<String> customBroadcasts([String? message]) {
-    return _customEvents
-        .receiveBroadcastStream(message)
-        .map((event) => event.toString());
-  }
+  static final StreamController<String> _custom =
+      StreamController<String>.broadcast();
 
-  static Stream<int> batteryPercents() {
-    return _batteryEvents.receiveBroadcastStream().map((event) => event as int);
+  static Stream<String> get custom => _custom.stream;
+
+  static void sendCustom(String message) {
+    _custom.add(message);
   }
 }

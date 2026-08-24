@@ -1,9 +1,7 @@
 import 'dart:async';
 
+import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-
-import '../services/media_channel.dart';
 
 class AudioPage extends StatefulWidget {
   const AudioPage({super.key});
@@ -13,65 +11,61 @@ class AudioPage extends StatefulWidget {
 }
 
 class _AudioPageState extends State<AudioPage> {
-  static const String _audioAsset = 'assets/media/sample_audio.mp3';
+  static const String _audioAsset = 'media/sample_audio.mp3';
 
-  StreamSubscription<Map<dynamic, dynamic>>? _subscription;
+  final AudioPlayer _player = AudioPlayer();
+  StreamSubscription<Duration>? _positionSub;
+  StreamSubscription<Duration>? _durationSub;
+  StreamSubscription<void>? _completeSub;
   bool _started = false;
   bool _playing = false;
   bool _seeking = false;
-  int _positionMs = 0;
-  int _durationMs = 0;
+  Duration _position = Duration.zero;
+  Duration _duration = Duration.zero;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    _subscription = MediaChannel.events().listen(_onEvent);
+    _positionSub = _player.onPositionChanged.listen((position) {
+      if (!_seeking && mounted) {
+        setState(() => _position = position);
+      }
+    });
+    _durationSub = _player.onDurationChanged.listen((duration) {
+      if (mounted) {
+        setState(() => _duration = duration);
+      }
+    });
+    _completeSub = _player.onPlayerComplete.listen((_) {
+      if (mounted) {
+        setState(() {
+          _playing = false;
+          _position = _duration;
+        });
+      }
+    });
   }
 
   @override
   void dispose() {
-    _subscription?.cancel();
-    MediaChannel.audioStop();
+    _positionSub?.cancel();
+    _durationSub?.cancel();
+    _completeSub?.cancel();
+    _player.dispose();
     super.dispose();
-  }
-
-  void _onEvent(Map<dynamic, dynamic> event) {
-    if (event['player'] != 'audio' || !mounted) {
-      return;
-    }
-    if (event['event'] == 'error') {
-      if (_playing || _started) {
-        return;
-      }
-      setState(() => _error = event['message']?.toString() ?? 'Could not play audio');
-      return;
-    }
-
-    setState(() {
-      _started = true;
-      _playing = event['playing'] == true && event['event'] != 'complete';
-      if (!_seeking) {
-        _positionMs = (event['position'] as num?)?.toInt() ?? _positionMs;
-      }
-      _durationMs = (event['duration'] as num?)?.toInt() ?? _durationMs;
-      if (event['event'] == 'complete') {
-        _playing = false;
-        _positionMs = _durationMs;
-      }
-    });
   }
 
   Future<void> _togglePlay() async {
     try {
       if (_playing) {
-        await MediaChannel.audioPause();
+        await _player.pause();
         setState(() => _playing = false);
         return;
       }
 
-      if (_started && _positionMs < _durationMs) {
-        await MediaChannel.audioResume();
+      if (_started && _position < _duration) {
+        await _player.resume();
         setState(() {
           _playing = true;
           _error = null;
@@ -79,42 +73,40 @@ class _AudioPageState extends State<AudioPage> {
         return;
       }
 
-      final info = await MediaChannel.audioPlay(_audioAsset);
+      await _player.play(AssetSource(_audioAsset));
       setState(() {
         _started = true;
         _playing = true;
         _error = null;
-        _positionMs = 0;
-        _durationMs = (info['duration'] as num?)?.toInt() ?? 0;
+        _position = Duration.zero;
       });
-    } on MissingPluginException {
-      setState(() => _error = 'Audio playback is available on Android only.');
     } catch (_) {
       setState(() => _error = 'Could not play audio');
     }
   }
 
   Future<void> _stop() async {
-    await MediaChannel.audioStop();
+    await _player.stop();
     setState(() {
       _started = false;
       _playing = false;
-      _positionMs = 0;
-      _durationMs = 0;
+      _position = Duration.zero;
     });
   }
 
   Future<void> _skip(int ms) async {
-    if (!_started || _durationMs == 0) {
+    if (!_started || _duration == Duration.zero) {
       return;
     }
-    final next = (_positionMs + ms).clamp(0, _durationMs);
-    await MediaChannel.audioSeek(next);
-    setState(() => _positionMs = next);
+    final next = _position + Duration(milliseconds: ms);
+    final clamped = next < Duration.zero
+        ? Duration.zero
+        : (next > _duration ? _duration : next);
+    await _player.seek(clamped);
+    setState(() => _position = clamped);
   }
 
-  String _time(int ms) {
-    final d = Duration(milliseconds: ms < 0 ? 0 : ms);
+  String _time(Duration d) {
     final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
     return '$minutes:$seconds';
@@ -122,6 +114,12 @@ class _AudioPageState extends State<AudioPage> {
 
   @override
   Widget build(BuildContext context) {
+    final durationMs = _duration.inMilliseconds;
+    final positionMs = _position.inMilliseconds.clamp(
+      0,
+      durationMs == 0 ? 0 : durationMs,
+    );
+
     return Padding(
       padding: const EdgeInsets.all(24),
       child: Column(
@@ -134,28 +132,30 @@ class _AudioPageState extends State<AudioPage> {
             const SizedBox(height: 16),
           ],
           Slider(
-            value: _durationMs == 0
-                ? 0
-                : _positionMs.clamp(0, _durationMs).toDouble(),
-            max: (_durationMs == 0 ? 1 : _durationMs).toDouble(),
+            value: durationMs == 0 ? 0 : positionMs.toDouble(),
+            max: (durationMs == 0 ? 1 : durationMs).toDouble(),
             onChangeStart: _started
                 ? (_) => setState(() => _seeking = true)
                 : null,
             onChanged: _started
-                ? (value) => setState(() => _positionMs = value.toInt())
+                ? (value) {
+                    setState(
+                      () => _position = Duration(milliseconds: value.toInt()),
+                    );
+                  }
                 : null,
             onChangeEnd: _started
                 ? (value) async {
-                    await MediaChannel.audioSeek(value.toInt());
+                    await _player.seek(Duration(milliseconds: value.toInt()));
                     setState(() => _seeking = false);
                   }
                 : null,
           ),
           Row(
             children: [
-              Text(_time(_positionMs)),
+              Text(_time(_position)),
               const Spacer(),
-              Text(_time(_durationMs)),
+              Text(_time(_duration)),
             ],
           ),
           const SizedBox(height: 8),

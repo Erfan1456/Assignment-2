@@ -1,9 +1,5 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-
-import '../services/media_channel.dart';
+import 'package:video_player/video_player.dart';
 
 class VideoPage extends StatefulWidget {
   const VideoPage({super.key});
@@ -15,43 +11,28 @@ class VideoPage extends StatefulWidget {
 class _VideoPageState extends State<VideoPage> {
   static const String _videoAsset = 'assets/media/sample_video.mp4';
 
-  StreamSubscription<Map<dynamic, dynamic>>? _subscription;
-  int? _textureId;
+  VideoPlayerController? _controller;
   bool _ready = false;
-  bool _playing = false;
-  bool _muted = false;
   bool _seeking = false;
-  int _positionMs = 0;
-  int _durationMs = 0;
-  double _aspect = 16 / 9;
+  bool _muted = false;
+  Duration _position = Duration.zero;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    _subscription = MediaChannel.events().listen(_onEvent);
     _start();
   }
 
   Future<void> _start() async {
+    final controller = VideoPlayerController.asset(_videoAsset);
+    _controller = controller;
+    controller.addListener(_onTick);
     try {
-      final info = await MediaChannel.videoInit(_videoAsset);
-      final width = (info['width'] as num?)?.toDouble() ?? 0;
-      final height = (info['height'] as num?)?.toDouble() ?? 0;
+      await controller.initialize();
+      await controller.play();
       if (mounted) {
-        setState(() {
-          _textureId = info['textureId'] as int?;
-          _durationMs = (info['duration'] as num?)?.toInt() ?? 0;
-          _ready = true;
-          _playing = true;
-          if (width > 0 && height > 0) {
-            _aspect = width / height;
-          }
-        });
-      }
-    } on MissingPluginException {
-      if (mounted) {
-        setState(() => _error = 'Video playback is available on Android only.');
+        setState(() => _ready = true);
       }
     } catch (_) {
       if (mounted) {
@@ -60,72 +41,60 @@ class _VideoPageState extends State<VideoPage> {
     }
   }
 
-  void _onEvent(Map<dynamic, dynamic> event) {
-    if (event['player'] != 'video' || !mounted) {
+  void _onTick() {
+    final controller = _controller;
+    if (!mounted || controller == null || !controller.value.isInitialized) {
       return;
     }
-    if (event['event'] == 'error') {
-      if (_playing || _ready) {
-        return;
-      }
-      setState(() => _error = event['message']?.toString() ?? 'Could not play video');
-      return;
+    if (!_seeking) {
+      setState(() => _position = controller.value.position);
+    } else {
+      setState(() {});
     }
-
-    final width = (event['width'] as num?)?.toDouble() ?? 0;
-    final height = (event['height'] as num?)?.toDouble() ?? 0;
-    setState(() {
-      _ready = true;
-      _playing = event['playing'] == true && event['event'] != 'complete';
-      _muted = event['muted'] == true;
-      if (!_seeking) {
-        _positionMs = (event['position'] as num?)?.toInt() ?? _positionMs;
-      }
-      _durationMs = (event['duration'] as num?)?.toInt() ?? _durationMs;
-      if (width > 0 && height > 0) {
-        _aspect = width / height;
-      }
-      if (event['event'] == 'complete') {
-        _playing = false;
-        _positionMs = _durationMs;
-      }
-    });
   }
 
   @override
   void dispose() {
-    _subscription?.cancel();
-    MediaChannel.videoDispose();
+    _controller?.removeListener(_onTick);
+    _controller?.dispose();
     super.dispose();
   }
 
+  VideoPlayerController get _player => _controller!;
+
+  bool get _playing => _player.value.isPlaying;
+
+  Duration get _duration => _player.value.duration;
+
   Future<void> _togglePlay() async {
     if (_playing) {
-      await MediaChannel.videoPause();
-      setState(() => _playing = false);
+      await _player.pause();
     } else {
-      if (_durationMs > 0 && _positionMs >= _durationMs) {
-        await MediaChannel.videoSeek(0);
+      if (_duration.inMilliseconds > 0 &&
+          _position >= _duration - const Duration(milliseconds: 400)) {
+        await _player.seekTo(Duration.zero);
       }
-      await MediaChannel.videoPlay();
-      setState(() => _playing = true);
+      await _player.play();
     }
+    setState(() {});
   }
 
   Future<void> _skip(int ms) async {
-    final next = (_positionMs + ms).clamp(0, _durationMs);
-    await MediaChannel.videoSeek(next);
-    setState(() => _positionMs = next);
+    final next = _position + Duration(milliseconds: ms);
+    final clamped = next < Duration.zero
+        ? Duration.zero
+        : (next > _duration ? _duration : next);
+    await _player.seekTo(clamped);
+    setState(() => _position = clamped);
   }
 
   Future<void> _toggleMute() async {
     final muted = !_muted;
-    await MediaChannel.videoMute(muted: muted);
+    await _player.setVolume(muted ? 0 : 1);
     setState(() => _muted = muted);
   }
 
-  String _time(int ms) {
-    final d = Duration(milliseconds: ms < 0 ? 0 : ms);
+  String _time(Duration d) {
     final hours = d.inHours;
     final minutes = d.inMinutes.remainder(60).toString().padLeft(2, '0');
     final seconds = d.inSeconds.remainder(60).toString().padLeft(2, '0');
@@ -140,6 +109,12 @@ class _VideoPageState extends State<VideoPage> {
     if (_error != null) {
       return Center(child: Text(_error!, textAlign: TextAlign.center));
     }
+    if (!_ready || _controller == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final durationMs = _duration.inMilliseconds;
+    final positionMs = _position.inMilliseconds.clamp(0, durationMs);
 
     return Padding(
       padding: const EdgeInsets.all(16),
@@ -147,81 +122,76 @@ class _VideoPageState extends State<VideoPage> {
         children: [
           Expanded(
             child: Center(
-              child: _textureId == null
-                  ? const CircularProgressIndicator()
-                  : AspectRatio(
-                      aspectRatio: _aspect,
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          ColoredBox(
-                            color: Colors.black,
-                            child: Texture(textureId: _textureId!),
-                          ),
-                          if (!_ready) const CircularProgressIndicator(),
-                          Positioned.fill(
-                            child: Material(
-                              color: Colors.transparent,
-                              child: InkWell(onTap: _ready ? _togglePlay : null),
-                            ),
-                          ),
-                          if (_ready && !_playing)
-                            const IgnorePointer(
-                              child: Icon(
-                                Icons.play_circle,
-                                size: 72,
-                                color: Colors.white,
-                              ),
-                            ),
-                        ],
+              child: AspectRatio(
+                aspectRatio: _player.value.aspectRatio == 0
+                    ? 16 / 9
+                    : _player.value.aspectRatio,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    ColoredBox(
+                      color: Colors.black,
+                      child: VideoPlayer(_player),
+                    ),
+                    Positioned.fill(
+                      child: Material(
+                        color: Colors.transparent,
+                        child: InkWell(onTap: _togglePlay),
                       ),
                     ),
+                    if (!_playing)
+                      const IgnorePointer(
+                        child: Icon(
+                          Icons.play_circle,
+                          size: 72,
+                          color: Colors.white,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             ),
           ),
           const SizedBox(height: 12),
           Slider(
-            value: _durationMs == 0
-                ? 0
-                : _positionMs.clamp(0, _durationMs).toDouble(),
-            max: (_durationMs == 0 ? 1 : _durationMs).toDouble(),
-            onChangeStart: _ready ? (_) => setState(() => _seeking = true) : null,
-            onChanged: _ready
-                ? (value) => setState(() => _positionMs = value.toInt())
-                : null,
-            onChangeEnd: _ready
-                ? (value) async {
-                    await MediaChannel.videoSeek(value.toInt());
-                    setState(() => _seeking = false);
-                  }
-                : null,
+            value: durationMs == 0 ? 0 : positionMs.toDouble(),
+            max: (durationMs == 0 ? 1 : durationMs).toDouble(),
+            onChangeStart: (_) => setState(() => _seeking = true),
+            onChanged: (value) {
+              setState(() => _position = Duration(milliseconds: value.toInt()));
+            },
+            onChangeEnd: (value) async {
+              await _player.seekTo(Duration(milliseconds: value.toInt()));
+              setState(() => _seeking = false);
+            },
           ),
           Row(
             children: [
-              Text(_time(_positionMs)),
+              Text(_time(_position)),
               const Spacer(),
-              Text(_time(_durationMs)),
+              Text(_time(_duration)),
             ],
           ),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               IconButton(
-                onPressed: _ready ? () => _skip(-10000) : null,
+                onPressed: () => _skip(-10000),
                 icon: const Icon(Icons.replay_10),
                 iconSize: 32,
               ),
               IconButton(
-                onPressed: _ready ? _togglePlay : null,
+                onPressed: _togglePlay,
                 icon: Icon(_playing ? Icons.pause_circle : Icons.play_circle),
                 iconSize: 56,
               ),
               IconButton(
-                onPressed: _ready ? () => _skip(10000) : null,
+                onPressed: () => _skip(10000),
                 icon: const Icon(Icons.forward_10),
                 iconSize: 32,
               ),
               IconButton(
-                onPressed: _ready ? _toggleMute : null,
+                onPressed: _toggleMute,
                 icon: Icon(_muted ? Icons.volume_off : Icons.volume_up),
               ),
             ],
